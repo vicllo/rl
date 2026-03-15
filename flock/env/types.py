@@ -57,7 +57,9 @@ class Policy(eqx.Module):
 class TeamConfig(NamedTuple):
     """Configuration for one team."""
     name: str
-    n_agents: int
+    n_agents_max: int
+    n_agents_init: int
+    death_ratio: float
     max_speed: float
     max_accel: float = 10.0
     k_teammates: int = 5

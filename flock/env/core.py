@@ -12,9 +12,9 @@ def reset(env_config: EnvConfig, rules: Rules, key: RngKey) -> EnvState:
     keys = jax.random.split(key, len(rules.teams))
     teams = tuple(
         Agents(
-            pos=jax.random.uniform(keys[i], (tc.n_agents, 2)) * env_config.arena_size,
-            vel=jnp.zeros((tc.n_agents, 2)),
-            alive=jnp.ones(tc.n_agents, dtype=jnp.bool_),
+            pos=jax.random.uniform(keys[i], (tc.n_agents_max, 2)) * env_config.arena_size,
+            vel=jnp.zeros((tc.n_agents_max, 2)),
+            alive=jnp.zeros((tc.n_agents_max,), dtype=jnp.bool_).at[:tc.n_agents_init].set(True),
         )
         for i, tc in enumerate(rules.teams)
     )
