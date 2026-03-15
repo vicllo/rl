@@ -4,7 +4,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from flock.env.types import Agents, EnvConfig, TeamConfig
+from flock.env.types import Agents, EnvConfig, TeamConfig, RngKey
 from flock.env.physics import pairwise_distances
 
 
@@ -12,7 +12,7 @@ class Rules(eqx.Module):
     """Base class for game rules. Defines teams and game mechanics."""
     teams: tuple[TeamConfig, ...]
 
-    def interact(self, env_config: EnvConfig, teams: tuple[Agents, ...]) -> tuple[tuple[Agents, ...], tuple[jax.Array, ...]]:
+    def interact(self, env_config: EnvConfig, teams: tuple[Agents, ...], key: RngKey) -> tuple[tuple[Agents, ...], tuple[jax.Array, ...]]:
         """Apply rules after physics. Returns (updated_teams, scores_per_team)."""
         raise NotImplementedError
 
@@ -33,6 +33,8 @@ class PredatorPrey(Rules):
         n_prey_init: int = 20,
         death_ratio_predator: float = 0.1,
         death_ratio_prey: float = 0,
+        birth_ratio_predator: float = 0,
+        birth_ratio_prey: float = 0.2,
         max_speed_predator: float = 1.0,
         max_speed_prey: float = 1.5,
         max_accel_predator: float = 8.0,
@@ -42,12 +44,12 @@ class PredatorPrey(Rules):
         k_opponents: int = 5,
     ):
         self.teams = (
-            TeamConfig("predators", n_predators_max, n_predators_init, death_ratio_predator, max_speed_predator, max_accel_predator, k_teammates, k_opponents),
-            TeamConfig("prey", n_prey_max, n_prey_init, death_ratio_prey, max_speed_prey, max_accel_prey, k_teammates, k_opponents),
+            TeamConfig("predators", n_predators_max, n_predators_init, death_ratio_predator, birth_ratio_predator, max_speed_predator, max_accel_predator, k_teammates, k_opponents),
+            TeamConfig("prey", n_prey_max, n_prey_init, death_ratio_prey, birth_ratio_prey, max_speed_prey, max_accel_prey, k_teammates, k_opponents),
         )
         self.catch_radius = catch_radius
 
-    def interact(self, env_config: EnvConfig, teams: tuple[Agents, ...]) -> tuple[tuple[Agents, ...], tuple[jax.Array, ...]]:
+    def interact(self, env_config: EnvConfig, teams: tuple[Agents, ...], key: RngKey) -> tuple[tuple[Agents, ...], tuple[jax.Array, ...]]:
         predators, prey = teams
 
         dists = pairwise_distances(predators.pos, prey.pos, env_config.arena_size, a_mask=predators.alive, b_mask=prey.alive)
@@ -55,18 +57,24 @@ class PredatorPrey(Rules):
         catch_mask = in_range & prey.alive[None, :]
         caught = jnp.any(catch_mask, axis=0)
         new_prey_alive = prey.alive & ~caught
+        new_prey = prey._replace(alive=new_prey_alive)
 
         # +1 for each predator within catch_radius of a caught prey (not split)
         pred_score = catch_mask.sum(axis=1).astype(jnp.float32)
 
+        # Randomly spawn new prey with a small probability in empty slots (simulate reproduction)
+        birth_prob = env_config.dt * self.teams[1].birth_ratio
+        random_vals = jax.random.uniform(key, shape=prey.alive.shape)
+        births = (random_vals < birth_prob) & ~new_prey.alive
+        new_prey_alive = new_prey.alive | births
+        new_prey = new_prey._replace(alive=new_prey_alive)
 
         # Randomly kill predators with a small probability among the alive ones (simulate natural death)
-        death_prob = env_config.dt * 5 
-        random_vals = jax.random.uniform(jax.random.PRNGKey(0), shape=predators.alive.shape)
+        death_prob = env_config.dt * self.teams[0].death_ratio
+        random_vals = jax.random.uniform(key, shape=predators.alive.shape)
         natural_deaths = (random_vals < death_prob) & predators.alive
         new_predators_alive = predators.alive & ~natural_deaths
         new_predators = predators._replace(alive=new_predators_alive)
-        
 
         # Reactivate dead predator slots, capped by the number of caught prey.
         nb_new_predators = jnp.minimum(
@@ -77,8 +85,7 @@ class PredatorPrey(Rules):
         spawn_mask = dead_slots & (jnp.cumsum(dead_slots.astype(jnp.int32)) <= nb_new_predators)
         new_predators = new_predators._replace(alive=new_predators.alive | spawn_mask)
 
-        new_prey = prey._replace(alive=new_prey_alive)
-        return (new_predators, new_prey), (pred_score, jnp.zeros(prey.pos.shape[0]))
+        return (new_predators, new_prey), (pred_score, jnp.zeros(new_prey.pos.shape[0]))
     
     def is_done(self, teams: tuple[Agents, ...]) -> jax.Array:
         """Done when all prey are dead."""
