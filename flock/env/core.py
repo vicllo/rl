@@ -26,6 +26,7 @@ def step(
     rules: Rules,
     state: EnvState,
     actions: tuple[jax.Array, ...],
+    key: RngKey,
 ) -> tuple[EnvState, StepInfo]:
     """One environment step. Pure function."""
 
@@ -49,7 +50,7 @@ def step(
     new_teams = tuple(new_teams)
 
     # Apply rules (catches, scores)
-    new_teams, scores = rules.interact(env_config, new_teams)
+    new_teams, scores = rules.interact(env_config, new_teams, key)
 
     # Done condition
     new_step = state.step_id + 1
@@ -90,7 +91,7 @@ def run_episodes(
         team_actions = tuple(a for a, _ in actions_and_states)
         new_policy_states = tuple(s for _, s in actions_and_states)
 
-        new_state, info = step(env_config, rules, state, team_actions)
+        new_state, info = step(env_config, rules, state, team_actions, key)
 
         # Freeze state once done
         done = done | info.done

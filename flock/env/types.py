@@ -60,6 +60,7 @@ class TeamConfig(NamedTuple):
     n_agents_max: int
     n_agents_init: int
     death_ratio: float
+    birth_ratio: float
     max_speed: float
     max_accel: float = 10.0
     k_teammates: int = 5
